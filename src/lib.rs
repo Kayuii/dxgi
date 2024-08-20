@@ -1,9 +1,11 @@
 use staging_texture::StagingTexture;
 use windows::Win32::{Foundation::LUID, Graphics::{Direct3D11::D3D11_MAPPED_SUBRESOURCE, Dxgi::IDXGIOutputDuplication}};
 
-pub mod dxgi;
+pub mod d3d11;
 pub mod utils;
 pub mod staging_texture;
+
+pub use d3d11::CaptureDXGI;
 
 pub struct OtherFrame<'a> {
     pub texture: &'a StagingTexture,

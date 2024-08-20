@@ -1,6 +1,6 @@
 use std::{io::{self, Write as _}, path::PathBuf, time::{Duration, Instant}};
 
-use dxgi::{CaptureDXGI, utils::get_hardware_adapter_desc};
+use dxgi::{utils::get_hardware_adapter_desc, CaptureDXGI};
 use env_logger::{init_from_env, Env, DEFAULT_FILTER_ENV};
 use log;
 use windows::Win32::{Foundation::{E_ACCESSDENIED, E_INVALIDARG, E_UNEXPECTED, S_FALSE}, Graphics::Dxgi::{DXGI_ERROR_ACCESS_LOST, DXGI_ERROR_INVALID_CALL, DXGI_ERROR_MODE_CHANGE_IN_PROGRESS, DXGI_ERROR_NOT_CURRENTLY_AVAILABLE, DXGI_ERROR_NOT_FOUND, DXGI_ERROR_SESSION_DISCONNECTED, DXGI_ERROR_UNSUPPORTED, DXGI_ERROR_WAIT_TIMEOUT}};
