@@ -4,11 +4,11 @@ use windows::Win32::Foundation::{LUID, S_FALSE};
 use windows::{core::Result, core::*, Win32::Graphics::Direct3D11::*, Win32::Graphics::Dxgi::*};
 
 use crate::staging_texture::StagingTexture;
-use crate::OtherFrame;
+use crate::{OtherFrame, OutputDuplication};
 
-use crate::utils::{acquire_duplication, init_adaptor, init_adaptor_by_luid};
-use crate::OutputDuplication;
-
+use crate::utils::{
+    acquire_duplication, get_hardware_adapter_desc, init_adaptor, init_adaptor_by_luid,
+};
 
 pub struct CaptureDXGI {
     device: ID3D11Device,
@@ -18,6 +18,7 @@ pub struct CaptureDXGI {
     capture_monitor_index: u32,
     width: u32,
     height: u32,
+    luid: i64,
 }
 
 impl Drop for CaptureDXGI {
@@ -30,6 +31,9 @@ impl CaptureDXGI {
             Some((a, d, ctx)) => {
                 match acquire_duplication(&a, &d, capture_monitor_index) {
                     Some(duplication) => {
+                        let luid = *duplication.adapter_desc.luid;
+                        let width = duplication.output_dimensions.0;
+                        let height = duplication.output_dimensions.1;
                         return Some(Self {
                             duplicator: Some(duplication),
                             device: d,
@@ -37,8 +41,9 @@ impl CaptureDXGI {
                             staging_texture: None,
                             // resources,
                             capture_monitor_index,
-                            width: 0,
-                            height: 0,
+                            width,
+                            height,
+                            luid,
                         });
                     }
                     None => {
@@ -56,25 +61,27 @@ impl CaptureDXGI {
 
     pub fn new_by_luid(luid: LUID, capture_monitor_index: u32) -> Option<CaptureDXGI> {
         match init_adaptor_by_luid(luid) {
-            Some((a, d, ctx)) => {
-                match acquire_duplication(&a, &d, capture_monitor_index) {
-                    Some(duplication) => {
-                        return Some(Self {
-                            duplicator: Some(duplication),
-                            device: d,
-                            device_context: ctx,
-                            staging_texture: None,
-                            capture_monitor_index,
-                            width: 0,
-                            height: 0,
-                        });
-                    }
-                    None => {
-                        log::debug!("acquire_duplication is None.");
-                        None
-                    }
+            Some((a, d, ctx)) => match acquire_duplication(&a, &d, capture_monitor_index) {
+                Some(duplication) => {
+                    let luid = *duplication.adapter_desc.luid;
+                    let width = duplication.output_dimensions.0;
+                    let height = duplication.output_dimensions.1;
+                    return Some(Self {
+                        duplicator: Some(duplication),
+                        device: d,
+                        device_context: ctx,
+                        staging_texture: None,
+                        capture_monitor_index,
+                        width,
+                        height,
+                        luid,
+                    });
                 }
-            }
+                None => {
+                    log::debug!("acquire_duplication is None.");
+                    None
+                }
+            },
             None => {
                 log::debug!("Should have an adaptor and d3d11 device now.");
                 None
@@ -158,21 +165,38 @@ impl CaptureDXGI {
                         tex_desc.Width,
                         tex_desc.Height,
                         tex_desc.Format,
+                        0,
                     )?;
                     self.staging_texture = Some(new_staging_texture);
                 }
 
                 unsafe {
-                    let copy_dest = self.staging_texture.as_ref().unwrap().as_resource()?;
                     let copy_src = texture.cast()?;
+                    let copy_dest = self.staging_texture.as_ref().unwrap().as_cpu_resource()?;
+                    let copy_gpu_dest = self.staging_texture.as_ref().unwrap().as_gpu_resource()?;
+                    let copy_view_dest =
+                        self.staging_texture.as_ref().unwrap().as_view_resource()?;
+                    let mip_level = self.staging_texture.as_ref().unwrap().mip_level;
+
                     self.device_context.CopySubresourceRegion(
-                        Some(&copy_dest),
+                        Some(&copy_gpu_dest),
                         0,
                         0,
                         0,
                         0,
                         Some(&copy_src),
                         0,
+                        None,
+                    );
+                    self.device_context.GenerateMips(Some(&copy_view_dest));
+                    self.device_context.CopySubresourceRegion(
+                        Some(&copy_dest),
+                        0,
+                        0,
+                        0,
+                        0,
+                        Some(&copy_gpu_dest),
+                        mip_level,
                         None,
                     );
 
@@ -245,6 +269,10 @@ impl CaptureDXGI {
 
     pub fn get_device(&self) -> *mut std::ffi::c_void {
         self.device.as_raw()
+    }
+
+    pub fn get_luid(&self) -> i64 {
+        self.luid
     }
 
     pub fn width(&self) -> i32 {

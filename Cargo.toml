@@ -8,7 +8,7 @@ default = []
 # vram = ["hwcodec/vram"]
 
 [dependencies]
-windows = { version = "0.56.0", features = [
+windows = { version = "0.58.0", features = [
     "Foundation",
     "Graphics_Capture",
     "Graphics_DirectX_Direct3D11",
@@ -36,7 +36,19 @@ windows = { version = "0.56.0", features = [
 
 log = "0.4.17"
 parking_lot = "0.12.2"
+anyhow = "1"
+
 
 [dev-dependencies]
-env_logger = "0.9.0"
+env_logger = "0.11.5"
 hwcodec = { git = "https://github.com/kayuii/hwcodec", branch = "21pages-stable",features = ["vram"]}
+winapi = { version = "0.3", default-features = true, features = [
+    "dxgi", 
+    "dxgi1_2", 
+    "dxgi1_5", 
+    "d3d11", 
+    "winuser", 
+    "winerror", 
+    "errhandlingapi", 
+    "libloaderapi"
+]}

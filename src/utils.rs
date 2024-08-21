@@ -1,19 +1,20 @@
-
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use parking_lot::Once;
 use windows::core::HSTRING;
 use windows::Win32::Foundation::{LUID, TRUE};
 use windows::Win32::Graphics::Direct3D::{
-    D3D_DRIVER_TYPE_UNKNOWN, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_11_1,
+    D3D11_SRV_DIMENSION_TEXTURE2D, D3D_DRIVER_TYPE_UNKNOWN, D3D_FEATURE_LEVEL_11_0,
+    D3D_FEATURE_LEVEL_11_1,
 };
 
-use windows::Win32::Graphics::Dxgi::{IDXGIAdapter3, IDXGIFactory4};
+use windows::Win32::Graphics::Dxgi::{IDXGIFactory4, DXGI_CREATE_FACTORY_FLAGS};
 use windows::Win32::System::WinRT::{RoInitialize, RO_INIT_MULTITHREADED};
 
 use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
 use windows::Win32::UI::HiDpi::{
-    SetProcessDpiAwareness, SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, PROCESS_PER_MONITOR_DPI_AWARE
+    SetProcessDpiAwareness, SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE,
+    DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, PROCESS_PER_MONITOR_DPI_AWARE,
 };
 
 use windows::Win32::UI::WindowsAndMessaging::SetProcessDPIAware;
@@ -24,12 +25,15 @@ use windows::{
         Graphics::{
             Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP},
             Direct3D11::{
-                D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-                D3D11_CREATE_DEVICE_FLAG, D3D11_SDK_VERSION,
+                D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext,
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_CREATE_DEVICE_FLAG, D3D11_SDK_VERSION,
             },
-            Dxgi::{CreateDXGIFactory2, IDXGIAdapter1, IDXGIDevice, IDXGIFactory7, IDXGIOutput1, IDXGIOutput6,
-                DXGI_ADAPTER_DESC1, DXGI_ADAPTER_FLAG, DXGI_ADAPTER_FLAG_NONE, DXGI_ADAPTER_FLAG_SOFTWARE,
-                DXGI_OUTDUPL_DESC, DXGI_OUTPUT_DESC, DXGI_ERROR_UNSUPPORTED},
+            Dxgi::{
+                CreateDXGIFactory2, IDXGIAdapter1, IDXGIDevice, IDXGIFactory7,
+                IDXGIOutput6, DXGI_ADAPTER_DESC1, DXGI_ADAPTER_FLAG, DXGI_ADAPTER_FLAG_NONE,
+                DXGI_ADAPTER_FLAG_SOFTWARE, DXGI_ERROR_UNSUPPORTED, DXGI_OUTDUPL_DESC,
+                DXGI_OUTPUT_DESC,
+            },
         },
         System::WinRT::Direct3D11::{
             CreateDirect3D11DeviceFromDXGIDevice, IDirect3DDxgiInterfaceAccess,
@@ -37,7 +41,7 @@ use windows::{
     },
 };
 
-use crate::AdapterDesc;
+use crate::{AdapterDesc, Luid};
 
 use crate::OutputDuplication;
 
@@ -64,11 +68,11 @@ fn set_dpi_aware() -> bool {
     }
 }
 
-fn set_process_dpi_awareness() -> bool{
+fn set_process_dpi_awareness() -> bool {
     unsafe {
-        if SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2).is_err()
-        {
-            let _bool = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE).is_ok();
+        if SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2).is_err() {
+            let _bool =
+                SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE).is_ok();
             log::info!("SetProcessDpiAwarenessContext [{}]", _bool);
             _bool
         } else {
@@ -101,9 +105,11 @@ fn find_terminal_idx(content: &[u16]) -> usize {
     }
     content.len()
 }
-pub(crate) fn convert_u16_to_string(data: &[u16]) -> String {
+pub fn convert_u16_to_string(data: &[u16]) -> String {
     let terminal_idx = find_terminal_idx(data);
-    HSTRING::from_wide(&data[0..terminal_idx]).expect("Strings are valid Unicode").to_string_lossy()
+    HSTRING::from_wide(&data[0..terminal_idx])
+        .expect("Strings are valid Unicode")
+        .to_string_lossy()
 }
 
 pub(crate) fn create_d3d_device() -> Result<ID3D11Device> {
@@ -138,17 +144,15 @@ pub(crate) fn create_direct3d_device(d3d_device: &ID3D11Device) -> Result<IDirec
     inspectable.cast()
 }
 
-pub(crate) fn get_d3d_interface_from_object<S: Interface, R: Interface>(
-    object: &S,
-) -> Result<R> {
+pub(crate) fn get_d3d_interface_from_object<S: Interface, R: Interface>(object: &S) -> Result<R> {
     let access: IDirect3DDxgiInterfaceAccess = object.cast()?;
     let object = unsafe { access.GetInterface::<R>()? };
     Ok(object)
 }
 
-pub fn get_hardware_adapter_desc() -> Option<Vec<AdapterDesc>> {
+pub fn get_hardware_adapters_desc() -> Option<Vec<AdapterDesc>> {
     let factory = unsafe {
-        match CreateDXGIFactory2::<IDXGIFactory7>(0) {
+        match CreateDXGIFactory2::<IDXGIFactory7>(DXGI_CREATE_FACTORY_FLAGS(0u32)) {
             Ok(factory) => factory,
             Err(e) => {
                 log::debug!("factory2 init fail: {:?}", e);
@@ -171,9 +175,8 @@ pub fn get_hardware_adapter_desc() -> Option<Vec<AdapterDesc>> {
     let mut i = 0;
     for adapter in adapters {
         unsafe {
-            let mut adapter_desc: DXGI_ADAPTER_DESC1 = Default::default();
-            match adapter.GetDesc1(&mut adapter_desc) {
-                Ok(_) => {
+            match adapter.GetDesc1() {
+                Ok(adapter_desc) => {
                     let adapter_flag = DXGI_ADAPTER_FLAG(adapter_desc.Flags as _);
 
                     let adapter_name = convert_u16_to_string(adapter_desc.Description.as_ref());
@@ -184,7 +187,8 @@ pub fn get_hardware_adapter_desc() -> Option<Vec<AdapterDesc>> {
                     let vendor_id = adapter_desc.VendorId;
                     let device_id = adapter_desc.DeviceId;
 
-                    let is_integrated = vendor_id == 0x8086 && (device_id == 0x163c || device_id == 0x1616);
+                    let is_integrated =
+                        vendor_id == 0x8086 && (device_id == 0x163c || device_id == 0x1616);
                     let is_discrete = !is_integrated;
                     let is_default = false;
                     let mut is_software = false;
@@ -217,7 +221,7 @@ pub fn get_hardware_adapter_desc() -> Option<Vec<AdapterDesc>> {
                     let adapter_desc = AdapterDesc {
                         index: i,
                         description: adapter_name.to_string(),
-                        luid,
+                        luid: luid.into(),
                         device_id,
                         vendor_id,
                         is_default,
@@ -234,7 +238,6 @@ pub fn get_hardware_adapter_desc() -> Option<Vec<AdapterDesc>> {
                     // );
 
                     adapters_desc.push(adapter_desc);
-                    
                 }
                 Err(e) => {
                     log::debug!("adapters1 GetDesc1 fail: {:?}", e);
@@ -250,9 +253,67 @@ pub fn get_hardware_adapter_desc() -> Option<Vec<AdapterDesc>> {
     None
 }
 
+pub fn get_hardware_adapter_desc(adapter: &IDXGIAdapter1) -> Option<AdapterDesc> {
+    unsafe {
+        match adapter.GetDesc1() {
+            Ok(adapter_desc) => {
+                let adapter_flag = DXGI_ADAPTER_FLAG(adapter_desc.Flags as _);
+
+                let adapter_name = convert_u16_to_string(adapter_desc.Description.as_ref());
+                // let _adapter_dedicated_video_memory = adapter_desc.DedicatedVideoMemory;
+                let luid = adapter_desc.AdapterLuid;
+                // let high_part = adapter_desc.AdapterLuid.HighPart;
+                // let low_part = adapter_desc.AdapterLuid.LowPart;
+                let vendor_id = adapter_desc.VendorId;
+                let device_id = adapter_desc.DeviceId;
+
+                let is_integrated =
+                    vendor_id == 0x8086 && (device_id == 0x163c || device_id == 0x1616);
+                let is_discrete = !is_integrated;
+                let is_default = false;
+                let mut is_software = false;
+
+                // desc.VendorId == 0x10DE  NVIDIA
+                // desc.VendorId == 0x1002 || 0x1022  AMD
+                // desc.VendorId == 0x8086) 0x163C, 0x8087 Intel
+                // Skip the software adaptor.
+                if (vendor_id == 0x1414) && (device_id == 0x8c) {
+                    // log::debug!("is Microsoft Basic Render Driver");
+                    is_software = true;
+                }
+                if (adapter_flag & DXGI_ADAPTER_FLAG_SOFTWARE) != DXGI_ADAPTER_FLAG_NONE {
+                    // log::debug!("Skip Software Adapter");
+                    is_software = true;
+                }
+
+                let is_hardware = !is_software;
+
+                let adapter_desc = AdapterDesc {
+                    index: 0,
+                    description: adapter_name.to_string(),
+                    luid: luid.into(),
+                    device_id,
+                    vendor_id,
+                    is_default,
+                    is_software,
+                    is_hardware,
+                    is_discrete,
+                    is_integrated,
+                };
+
+                Some(adapter_desc)
+            }
+            Err(e) => {
+                log::debug!("adapters1 GetDesc1 fail: {:?}", e);
+                return None;
+            }
+        }
+    }
+}
+
 pub(crate) fn init_adaptor() -> Option<(IDXGIAdapter1, ID3D11Device, ID3D11DeviceContext)> {
     let factory = unsafe {
-        match CreateDXGIFactory2::<IDXGIFactory7>(0) {
+        match CreateDXGIFactory2::<IDXGIFactory7>(DXGI_CREATE_FACTORY_FLAGS(0u32)) {
             Ok(factory) => factory,
             Err(e) => {
                 log::debug!("factory2 init fail: {:?}", e);
@@ -273,9 +334,8 @@ pub(crate) fn init_adaptor() -> Option<(IDXGIAdapter1, ID3D11Device, ID3D11Devic
 
     for adapter in adapters {
         unsafe {
-            let mut adapter_desc: DXGI_ADAPTER_DESC1 = Default::default();
-            match adapter.GetDesc1(&mut adapter_desc) {
-                Ok(_) => {
+            match adapter.GetDesc1() {
+                Ok(adapter_desc) => {
                     let adapter_flag = DXGI_ADAPTER_FLAG(adapter_desc.Flags as _);
 
                     let adapter_name = convert_u16_to_string(adapter_desc.Description.as_ref());
@@ -359,10 +419,11 @@ pub(crate) fn init_adaptor() -> Option<(IDXGIAdapter1, ID3D11Device, ID3D11Devic
     None
 }
 
-
-pub(crate) fn init_adaptor_by_luid(luid: LUID) -> Option<(IDXGIAdapter1, ID3D11Device, ID3D11DeviceContext)> {
+pub(crate) fn init_adaptor_by_luid(
+    luid: LUID,
+) -> Option<(IDXGIAdapter1, ID3D11Device, ID3D11DeviceContext)> {
     let factory = unsafe {
-        match CreateDXGIFactory2::<IDXGIFactory7>(0) {
+        match CreateDXGIFactory2::<IDXGIFactory7>(DXGI_CREATE_FACTORY_FLAGS(0u32)) {
             Ok(factory) => factory,
             Err(e) => {
                 log::debug!("factory2 init fail: {:?}", e);
@@ -375,7 +436,7 @@ pub(crate) fn init_adaptor_by_luid(luid: LUID) -> Option<(IDXGIAdapter1, ID3D11D
 
     unsafe {
         match factory.EnumAdapterByLuid::<IDXGIFactory4>(luid) {
-            Ok(adapter) => { 
+            Ok(adapter) => {
                 let adapter1 = adapter.cast::<IDXGIAdapter1>().unwrap();
                 let mut level_used = D3D_FEATURE_LEVEL_11_0;
                 let feature_levels = [D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0];
@@ -388,15 +449,15 @@ pub(crate) fn init_adaptor_by_luid(luid: LUID) -> Option<(IDXGIAdapter1, ID3D11D
                 let mut d3d11_device_ctx: Option<ID3D11DeviceContext> = None;
 
                 match D3D11CreateDevice(
-                        &adapter1,
-                        device_types,
-                        None,
-                        device_flags,
-                        Some(&feature_levels),
-                        D3D11_SDK_VERSION,
-                        Some(&mut d3d11_device),
-                        Some(&mut level_used),
-                        Some(&mut d3d11_device_ctx),
+                    &adapter1,
+                    device_types,
+                    None,
+                    device_flags,
+                    Some(&feature_levels),
+                    D3D11_SDK_VERSION,
+                    Some(&mut d3d11_device),
+                    Some(&mut level_used),
+                    Some(&mut d3d11_device_ctx),
                 ) {
                     Ok(_) => {
                         log::debug!("D3D11 device ok for {:?} ", device_types);
@@ -440,9 +501,8 @@ pub(crate) fn acquire_duplication(
                         return None;
                     }
                 };
-                let mut output_desc: DXGI_OUTPUT_DESC = Default::default();
-                match unsafe { output.GetDesc(&mut output_desc) } {
-                    Ok(_) => {
+                match unsafe { output.GetDesc() } {
+                    Ok(output_desc) => {
                         let _name = convert_u16_to_string(output_desc.DeviceName.as_ref());
                         let _monitor = output_desc.Monitor;
                         let _attached_to_desktop = output_desc.AttachedToDesktop == TRUE;
@@ -453,11 +513,12 @@ pub(crate) fn acquire_duplication(
                             - output_desc.DesktopCoordinates.top;
                         match unsafe { output.DuplicateOutput(d3d11_device) } {
                             Ok(duplicator) => {
-                                let mut duplicator_desc: DXGI_OUTDUPL_DESC = Default::default();
-                                unsafe { duplicator.GetDesc(&mut duplicator_desc) };
+                                // let duplicator_desc =  unsafe { duplicator.GetDesc() };
+                                let adapter_desc = get_hardware_adapter_desc(adapter)?;
                                 return Some(OutputDuplication {
                                     duplication: duplicator,
                                     output_dimensions: (width as _, height as _),
+                                    adapter_desc,
                                 });
                             }
                             Err(e) => {
@@ -481,5 +542,3 @@ pub(crate) fn acquire_duplication(
     }
     None
 }
-
-
